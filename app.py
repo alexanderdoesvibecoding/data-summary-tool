@@ -8,6 +8,110 @@ st.set_page_config(
     layout="wide"
 )
 
+
+def detect_column_type(series: pd.Series) -> str:
+    """
+    Detects a beginner-friendly column type.
+
+    Possible types:
+    - Numeric
+    - Categorical
+    - Date/time
+    - Boolean
+    - Text
+    - ID-like
+    """
+
+    non_missing_series = series.dropna()
+    total_non_missing = len(non_missing_series)
+
+    if total_non_missing == 0:
+        return "Text"
+
+    unique_count = non_missing_series.nunique()
+    unique_percentage = unique_count / total_non_missing
+
+    column_name = series.name.lower()
+
+    # Boolean columns
+    if pd.api.types.is_bool_dtype(series):
+        return "Boolean"
+
+    boolean_like_values = set(
+        non_missing_series.astype(str).str.lower().str.strip().unique()
+    )
+
+    common_boolean_values = {
+        "true",
+        "false",
+        "yes",
+        "no",
+        "y",
+        "n",
+        "0",
+        "1"
+    }
+
+    if boolean_like_values.issubset(common_boolean_values) and unique_count <= 2:
+        return "Boolean"
+
+    # Date/time columns
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return "Date/time"
+
+    if pd.api.types.is_object_dtype(series):
+        converted_dates = pd.to_datetime(
+            non_missing_series,
+            errors="coerce"
+        )
+
+        date_match_percentage = converted_dates.notna().sum() / total_non_missing
+
+        if date_match_percentage >= 0.8:
+            return "Date/time"
+
+    # Numeric columns
+    if pd.api.types.is_numeric_dtype(series):
+        # Numeric ID-like columns
+        if (
+            unique_percentage > 0.9
+            and (
+                "id" in column_name
+                or column_name.endswith("_id")
+                or column_name.endswith("id")
+            )
+        ):
+            return "ID-like"
+
+        return "Numeric"
+
+    # ID-like text columns
+    if (
+        unique_percentage > 0.9
+        and (
+            "id" in column_name
+            or column_name.endswith("_id")
+            or column_name.endswith("id")
+            or "uuid" in column_name
+            or "code" in column_name
+        )
+    ):
+        return "ID-like"
+
+    # Categorical columns
+    if unique_count <= 20 or unique_percentage <= 0.2:
+        return "Categorical"
+
+    # Longer free-form text columns
+    average_text_length = non_missing_series.astype(str).str.len().mean()
+
+    if average_text_length >= 30:
+        return "Text"
+
+    # Default object/string columns to categorical
+    return "Categorical"
+
+
 st.title("📊 Data Summarization and Visualization Tool")
 st.write("Upload a CSV file to get started.")
 
@@ -47,35 +151,36 @@ if uploaded_file is not None:
             else:
                 missing_value_percentage = 0
 
-            # Column type counts
-            numeric_columns = df.select_dtypes(include="number").columns.tolist()
-
-            categorical_columns = df.select_dtypes(
-                include=["object", "category", "bool"]
-            ).columns.tolist()
-
-            # Detect date-like columns
-            date_like_columns = []
+            # Detect column types
+            column_summary = []
 
             for column in df.columns:
-                if df[column].dtype == "object":
-                    converted_column = pd.to_datetime(
-                        df[column],
-                        errors="coerce"
-                    )
+                detected_type = detect_column_type(df[column])
+                missing_values = df[column].isnull().sum()
+                unique_values = df[column].nunique()
 
-                    valid_dates = converted_column.notna().sum()
-                    total_values = df[column].notna().sum()
+                column_summary.append(
+                    {
+                        "Column": column,
+                        "Detected Type": detected_type,
+                        "Missing Values": missing_values,
+                        "Unique Values": unique_values
+                    }
+                )
 
-                    if total_values > 0:
-                        date_match_percentage = valid_dates / total_values
+            column_summary_df = pd.DataFrame(column_summary)
 
-                        if date_match_percentage >= 0.8:
-                            date_like_columns.append(column)
+            number_of_numeric_columns = (
+                column_summary_df["Detected Type"] == "Numeric"
+            ).sum()
 
-            number_of_numeric_columns = len(numeric_columns)
-            number_of_categorical_columns = len(categorical_columns)
-            number_of_date_like_columns = len(date_like_columns)
+            number_of_categorical_columns = (
+                column_summary_df["Detected Type"] == "Categorical"
+            ).sum()
+
+            number_of_date_time_columns = (
+                column_summary_df["Detected Type"] == "Date/time"
+            ).sum()
 
             col1, col2, col3 = st.columns(3)
 
@@ -102,14 +207,21 @@ if uploaded_file is not None:
             with col6:
                 st.metric("Categorical Columns", number_of_categorical_columns)
 
-            st.metric("Date-like Columns", number_of_date_like_columns)
+            st.metric("Date/time Columns", number_of_date_time_columns)
 
             st.subheader("Column Names")
             st.write(list(df.columns))
 
-            if date_like_columns:
-                st.subheader("Detected Date-like Columns")
-                st.write(date_like_columns)
+            st.subheader("Column Type Detection")
+            st.write(
+                "Each column is automatically classified to help decide what kind of analysis or visualization may fit best."
+            )
+
+            st.dataframe(
+                column_summary_df,
+                use_container_width=True,
+                hide_index=True
+            )
 
     except Exception as e:
         st.error("There was a problem loading this CSV file.")
