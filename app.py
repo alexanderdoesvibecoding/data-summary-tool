@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 
 
 st.set_page_config(
@@ -10,18 +11,6 @@ st.set_page_config(
 
 
 def detect_column_type(series: pd.Series) -> str:
-    """
-    Detects a beginner-friendly column type.
-
-    Possible types:
-    - Numeric
-    - Categorical
-    - Date/time
-    - Boolean
-    - Text
-    - ID-like
-    """
-
     non_missing_series = series.dropna()
     total_non_missing = len(non_missing_series)
 
@@ -30,10 +19,8 @@ def detect_column_type(series: pd.Series) -> str:
 
     unique_count = non_missing_series.nunique()
     unique_percentage = unique_count / total_non_missing
-
     column_name = series.name.lower()
 
-    # Boolean columns
     if pd.api.types.is_bool_dtype(series):
         return "Boolean"
 
@@ -55,7 +42,6 @@ def detect_column_type(series: pd.Series) -> str:
     if boolean_like_values.issubset(common_boolean_values) and unique_count <= 2:
         return "Boolean"
 
-    # Date/time columns
     if pd.api.types.is_datetime64_any_dtype(series):
         return "Date/time"
 
@@ -70,9 +56,7 @@ def detect_column_type(series: pd.Series) -> str:
         if date_match_percentage >= 0.8:
             return "Date/time"
 
-    # Numeric columns
     if pd.api.types.is_numeric_dtype(series):
-        # Numeric ID-like columns
         if (
             unique_percentage > 0.9
             and (
@@ -85,7 +69,6 @@ def detect_column_type(series: pd.Series) -> str:
 
         return "Numeric"
 
-    # ID-like text columns
     if (
         unique_percentage > 0.9
         and (
@@ -98,28 +81,18 @@ def detect_column_type(series: pd.Series) -> str:
     ):
         return "ID-like"
 
-    # Categorical columns
     if unique_count <= 20 or unique_percentage <= 0.2:
         return "Categorical"
 
-    # Longer free-form text columns
     average_text_length = non_missing_series.astype(str).str.len().mean()
 
     if average_text_length >= 30:
         return "Text"
 
-    # Default object/string columns to categorical
     return "Categorical"
 
 
 def has_possible_outliers(series: pd.Series) -> bool:
-    """
-    Checks for possible numeric outliers using the IQR method.
-
-    This is a common beginner-friendly rule:
-    values far below Q1 or far above Q3 are flagged as possible outliers.
-    """
-
     numeric_series = pd.to_numeric(series, errors="coerce").dropna()
 
     if len(numeric_series) < 4:
@@ -143,16 +116,11 @@ def has_possible_outliers(series: pd.Series) -> bool:
 
 
 def generate_data_quality_notes(df: pd.DataFrame, column_summary_df: pd.DataFrame) -> list:
-    """
-    Creates plain-English data quality notes for non-technical users.
-    """
-
     notes = []
 
     number_of_rows = df.shape[0]
     duplicate_row_count = df.duplicated().sum()
 
-    # Columns with missing values
     columns_with_missing_values = column_summary_df[
         column_summary_df["Missing Values"] > 0
     ]
@@ -165,14 +133,12 @@ def generate_data_quality_notes(df: pd.DataFrame, column_summary_df: pd.DataFram
             "This means some rows do not have an answer or value for those columns."
         )
 
-    # Duplicate rows
     if duplicate_row_count > 0:
         notes.append(
             f"There are {duplicate_row_count} duplicate rows. "
             "Duplicate rows may represent repeated records, so you may want to review them before analysis."
         )
 
-    # Columns with only one unique value
     single_value_columns = column_summary_df[
         column_summary_df["Unique Values"] == 1
     ]["Column"].tolist()
@@ -183,7 +149,6 @@ def generate_data_quality_notes(df: pd.DataFrame, column_summary_df: pd.DataFram
             "They may not be very useful for comparisons because every row has the same value."
         )
 
-    # Possible ID columns
     possible_id_columns = column_summary_df[
         column_summary_df["Detected Type"] == "ID-like"
     ]["Column"].tolist()
@@ -194,7 +159,6 @@ def generate_data_quality_notes(df: pd.DataFrame, column_summary_df: pd.DataFram
             "ID columns are useful for identifying records, but they usually should not be averaged, summed, or charted like normal numbers."
         )
 
-    # Numeric columns with possible outliers
     numeric_columns = column_summary_df[
         column_summary_df["Detected Type"] == "Numeric"
     ]["Column"].tolist()
@@ -211,7 +175,6 @@ def generate_data_quality_notes(df: pd.DataFrame, column_summary_df: pd.DataFram
             "These values may be correct, but they are worth checking because they can strongly affect averages and charts."
         )
 
-    # Columns with very high uniqueness
     high_uniqueness_columns = []
 
     if number_of_rows > 0:
@@ -240,6 +203,190 @@ def generate_data_quality_notes(df: pd.DataFrame, column_summary_df: pd.DataFram
     return notes
 
 
+def show_automatic_visualizations(
+    df: pd.DataFrame,
+    column_summary_df: pd.DataFrame
+) -> None:
+    st.header("Automatic Visualizations")
+
+    st.write(
+        "The app chooses a small number of useful charts so the page does not get overcrowded."
+    )
+
+    numeric_columns = column_summary_df[
+        column_summary_df["Detected Type"] == "Numeric"
+    ]["Column"].tolist()
+
+    categorical_columns = column_summary_df[
+        column_summary_df["Detected Type"] == "Categorical"
+    ]["Column"].tolist()
+
+    date_columns = column_summary_df[
+        column_summary_df["Detected Type"] == "Date/time"
+    ]["Column"].tolist()
+
+    charts_created = 0
+
+    # Histograms for up to 2 useful numeric columns
+    useful_numeric_columns = []
+
+    for column in numeric_columns:
+        if df[column].nunique(dropna=True) > 1:
+            useful_numeric_columns.append(column)
+
+    for column in useful_numeric_columns[:2]:
+        st.subheader(f"Distribution of {column}")
+
+        fig = px.histogram(
+            df,
+            x=column,
+            title=f"Distribution of {column}",
+            nbins=30
+        )
+
+        fig.update_layout(
+            xaxis_title=column,
+            yaxis_title="Number of rows"
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+        charts_created += 1
+
+    # Bar charts for up to 2 useful categorical columns
+    useful_categorical_columns = []
+
+    for column in categorical_columns:
+        unique_count = df[column].nunique(dropna=True)
+
+        if 2 <= unique_count <= 50:
+            useful_categorical_columns.append(column)
+
+    for column in useful_categorical_columns[:2]:
+        st.subheader(f"Top categories in {column}")
+
+        top_categories = (
+            df[column]
+            .fillna("Missing")
+            .astype(str)
+            .value_counts()
+            .head(10)
+            .reset_index()
+        )
+
+        top_categories.columns = [column, "Count"]
+
+        fig = px.bar(
+            top_categories,
+            x="Count",
+            y=column,
+            orientation="h",
+            title=f"Top 10 categories in {column}"
+        )
+
+        fig.update_layout(
+            xaxis_title="Number of rows",
+            yaxis_title=column,
+            yaxis={
+                "categoryorder": "total ascending"
+            }
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+        charts_created += 1
+
+    # Correlation heatmap if there are at least 2 numeric columns
+    if len(useful_numeric_columns) >= 2:
+        st.subheader("Correlation Between Numeric Columns")
+
+        correlation_df = df[useful_numeric_columns].corr(numeric_only=True)
+
+        fig = px.imshow(
+            correlation_df,
+            text_auto=".2f",
+            title="Correlation heatmap",
+            color_continuous_scale="RdBu",
+            zmin=-1,
+            zmax=1
+        )
+
+        fig.update_layout(
+            xaxis_title="Numeric columns",
+            yaxis_title="Numeric columns"
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+        charts_created += 1
+
+    # Date trend chart if a date column exists
+    if date_columns:
+        date_column = date_columns[0]
+
+        chart_df = df.copy()
+        chart_df[date_column] = pd.to_datetime(
+            chart_df[date_column],
+            errors="coerce"
+        )
+
+        chart_df = chart_df.dropna(subset=[date_column])
+
+        if not chart_df.empty:
+            st.subheader(f"Trend over time using {date_column}")
+
+            chart_df["Date Period"] = chart_df[date_column].dt.to_period("M").dt.to_timestamp()
+
+            if useful_numeric_columns:
+                numeric_column = useful_numeric_columns[0]
+
+                trend_df = (
+                    chart_df
+                    .groupby("Date Period")[numeric_column]
+                    .mean()
+                    .reset_index()
+                )
+
+                fig = px.line(
+                    trend_df,
+                    x="Date Period",
+                    y=numeric_column,
+                    markers=True,
+                    title=f"Average {numeric_column} over time"
+                )
+
+                fig.update_layout(
+                    xaxis_title=date_column,
+                    yaxis_title=f"Average {numeric_column}"
+                )
+
+            else:
+                trend_df = (
+                    chart_df
+                    .groupby("Date Period")
+                    .size()
+                    .reset_index(name="Row Count")
+                )
+
+                fig = px.line(
+                    trend_df,
+                    x="Date Period",
+                    y="Row Count",
+                    markers=True,
+                    title="Number of rows over time"
+                )
+
+                fig.update_layout(
+                    xaxis_title=date_column,
+                    yaxis_title="Number of rows"
+                )
+
+            st.plotly_chart(fig, use_container_width=True)
+            charts_created += 1
+
+    if charts_created == 0:
+        st.info(
+            "No automatic charts were created because the app did not find enough suitable numeric, categorical, or date/time columns."
+        )
+
+
 st.title("📊 Data Summarization and Visualization Tool")
 st.write("Upload a CSV file to get started.")
 
@@ -263,14 +410,11 @@ if uploaded_file is not None:
 
             st.header("Dataset Overview")
 
-            # Basic dataset shape
             number_of_rows = df.shape[0]
             number_of_columns = df.shape[1]
 
-            # Duplicate rows
             duplicate_row_count = df.duplicated().sum()
 
-            # Missing value percentage across the whole dataset
             total_cells = number_of_rows * number_of_columns
             missing_cells = df.isnull().sum().sum()
 
@@ -279,7 +423,6 @@ if uploaded_file is not None:
             else:
                 missing_value_percentage = 0
 
-            # Detect column types
             column_summary = []
 
             for column in df.columns:
@@ -363,6 +506,8 @@ if uploaded_file is not None:
 
             for note in data_quality_notes:
                 st.info(note)
+
+            show_automatic_visualizations(df, column_summary_df)
 
     except Exception as e:
         st.error("There was a problem loading this CSV file.")
