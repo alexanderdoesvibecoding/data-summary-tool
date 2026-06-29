@@ -19,6 +19,7 @@ from utils.data_loader import (
 )
 from utils.data_quality import generate_data_quality_notes
 from utils.insight_generator import generate_key_insights
+from utils.report_generator import generate_markdown_report
 from utils.type_detection import create_column_summary
 
 
@@ -166,6 +167,10 @@ if uploaded_file is not None:
             numeric_columns = get_numeric_columns(df, column_summary_df)
             categorical_columns = get_categorical_columns(df, column_summary_df)
             date_columns = get_date_columns(column_summary_df)
+
+            selected_numeric_column = None
+            selected_categorical_column = None
+            selected_date_column = None
 
             st.subheader("Numeric Column Analysis")
 
@@ -340,6 +345,37 @@ if uploaded_file is not None:
 
             for insight in key_insights:
                 st.success(insight)
+
+            st.header("Download Report")
+            st.write(
+                "Download a simple Markdown report with the dataset summary, notes, insights, "
+                "and the currently selected visualization columns."
+            )
+
+            selected_visualizations = {
+                "numeric_column": selected_numeric_column,
+                "categorical_column": selected_categorical_column,
+                "date_column": selected_date_column,
+                "correlation_heatmap_included": correlation_fig is not None,
+                "correlation_columns": numeric_columns
+            }
+
+            report_markdown = generate_markdown_report(
+                file_name=uploaded_file.name,
+                sheet_name=selected_sheet_name,
+                overview=overview,
+                data_quality_notes=data_quality_notes,
+                column_summary_df=column_summary_df,
+                key_insights=key_insights,
+                selected_visualizations=selected_visualizations
+            )
+
+            st.download_button(
+                label="Download Markdown Report",
+                data=report_markdown,
+                file_name="data_summary_report.md",
+                mime="text/markdown"
+            )
 
     except ValueError as e:
         st.error(str(e))
