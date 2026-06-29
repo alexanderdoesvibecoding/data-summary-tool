@@ -11,7 +11,12 @@ from utils.chart_generator import (
     get_date_columns,
     get_numeric_columns,
 )
-from utils.data_loader import get_dataset_overview, load_csv
+from utils.data_loader import (
+    get_dataset_overview,
+    get_excel_sheet_names,
+    get_file_extension,
+    load_uploaded_file,
+)
 from utils.data_quality import generate_data_quality_notes
 from utils.insight_generator import generate_key_insights
 from utils.type_detection import create_column_summary
@@ -25,25 +30,66 @@ st.set_page_config(
 
 
 st.title("📊 Data Summarization and Visualization Tool")
-st.write("Upload a CSV file to get started.")
+st.write("Upload a CSV or Excel file to get started.")
 
 uploaded_file = st.file_uploader(
-    "Choose a CSV file",
-    type=["csv"]
+    "Choose a CSV or Excel file",
+    type=["csv", "xlsx", "xls"]
 )
 
 if uploaded_file is not None:
     if st.session_state.get("uploaded_file_name") != uploaded_file.name:
         st.session_state["uploaded_file_name"] = uploaded_file.name
         st.session_state["analysis_started"] = False
+        st.session_state["selected_sheet_name"] = None
 
     st.subheader("Uploaded File")
     st.write(f"**File name:** {uploaded_file.name}")
 
     try:
-        df = load_csv(uploaded_file)
+        file_extension = get_file_extension(uploaded_file.name)
+        selected_sheet_name = None
+
+        if file_extension in ["xlsx", "xls"]:
+            sheet_names = get_excel_sheet_names(uploaded_file)
+
+            if not sheet_names:
+                st.error(
+                    "This Excel file does not appear to contain any sheets. "
+                    "Please upload a different CSV or Excel file."
+                )
+                st.stop()
+
+            selected_sheet_name = st.selectbox(
+                "Choose an Excel sheet to analyze",
+                sheet_names
+            )
+
+            st.session_state["selected_sheet_name"] = selected_sheet_name
+
+        df = load_uploaded_file(
+            uploaded_file,
+            sheet_name=selected_sheet_name
+        )
+
+        if df.empty:
+            if selected_sheet_name:
+                st.warning(
+                    f"The selected sheet, '{selected_sheet_name}', is empty. "
+                    "Please choose a different sheet or upload a file with data."
+                )
+            else:
+                st.warning(
+                    "This file appears to be empty. Please upload a file with data."
+                )
+
+            st.stop()
 
         st.subheader("Preview: First 10 Rows")
+
+        if selected_sheet_name:
+            st.write(f"Currently analyzing sheet: **{selected_sheet_name}**")
+
         st.dataframe(df.head(10), use_container_width=True)
 
         if st.button("Go"):
@@ -149,7 +195,10 @@ if uploaded_file is not None:
                         st.metric("Median", f"{numeric_summary['median']:.2f}")
 
                     with metric_col3:
-                        st.metric("Standard Deviation", f"{numeric_summary['standard_deviation']:.2f}")
+                        st.metric(
+                            "Standard Deviation",
+                            f"{numeric_summary['standard_deviation']:.2f}"
+                        )
 
                     metric_col4, metric_col5, metric_col6 = st.columns(3)
 
@@ -292,9 +341,14 @@ if uploaded_file is not None:
             for insight in key_insights:
                 st.success(insight)
 
-    except Exception as e:
-        st.error("There was a problem loading this CSV file.")
-        st.write(e)
+    except ValueError as e:
+        st.error(str(e))
+
+    except Exception:
+        st.error(
+            "There was a problem reading this file. "
+            "Please make sure it is a valid CSV or Excel file and try again."
+        )
 
 else:
-    st.info("Please upload a CSV file to begin.")
+    st.info("Please upload a CSV or Excel file to begin.")

@@ -70,10 +70,12 @@ def generate_numeric_summary(df: pd.DataFrame, column: str) -> dict:
 
 def generate_numeric_histogram(df: pd.DataFrame, column: str):
     chart_df = df[[column]].copy()
+
     chart_df[column] = pd.to_numeric(
         chart_df[column],
         errors="coerce"
     )
+
     chart_df = chart_df.dropna(subset=[column])
 
     fig = px.histogram(
@@ -151,6 +153,7 @@ def generate_categorical_bar_chart(df: pd.DataFrame, column: str):
 
 def generate_date_trend_chart(df: pd.DataFrame, column: str):
     chart_df = df[[column]].copy()
+
     chart_df[column] = pd.to_datetime(
         chart_df[column],
         errors="coerce"
