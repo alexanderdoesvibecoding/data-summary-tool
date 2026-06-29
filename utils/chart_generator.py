@@ -2,7 +2,7 @@ import pandas as pd
 import plotly.express as px
 
 
-def get_useful_numeric_columns(df: pd.DataFrame, column_summary_df: pd.DataFrame) -> list:
+def get_numeric_columns(df: pd.DataFrame, column_summary_df: pd.DataFrame) -> list:
     numeric_columns = column_summary_df[
         column_summary_df["Detected Type"] == "Numeric"
     ]["Column"].tolist()
@@ -10,13 +10,13 @@ def get_useful_numeric_columns(df: pd.DataFrame, column_summary_df: pd.DataFrame
     useful_numeric_columns = []
 
     for column in numeric_columns:
-        if df[column].nunique(dropna=True) > 1:
+        if df[column].dropna().nunique() > 1:
             useful_numeric_columns.append(column)
 
     return useful_numeric_columns
 
 
-def get_useful_categorical_columns(df: pd.DataFrame, column_summary_df: pd.DataFrame) -> list:
+def get_categorical_columns(df: pd.DataFrame, column_summary_df: pd.DataFrame) -> list:
     categorical_columns = column_summary_df[
         column_summary_df["Detected Type"] == "Categorical"
     ]["Column"].tolist()
@@ -24,170 +24,206 @@ def get_useful_categorical_columns(df: pd.DataFrame, column_summary_df: pd.DataF
     useful_categorical_columns = []
 
     for column in categorical_columns:
-        unique_count = df[column].nunique(dropna=True)
+        unique_count = df[column].dropna().nunique()
 
-        if 2 <= unique_count <= 50:
+        if unique_count >= 1:
             useful_categorical_columns.append(column)
 
     return useful_categorical_columns
 
 
-def generate_automatic_charts(df: pd.DataFrame, column_summary_df: pd.DataFrame) -> list:
-    charts = []
-
-    useful_numeric_columns = get_useful_numeric_columns(df, column_summary_df)
-    useful_categorical_columns = get_useful_categorical_columns(df, column_summary_df)
-
-    date_columns = column_summary_df[
+def get_date_columns(column_summary_df: pd.DataFrame) -> list:
+    return column_summary_df[
         column_summary_df["Detected Type"] == "Date/time"
     ]["Column"].tolist()
 
-    # Histograms for up to 2 useful numeric columns
-    for column in useful_numeric_columns[:2]:
-        fig = px.histogram(
-            df,
-            x=column,
-            title=f"Distribution of {column}",
-            nbins=30
-        )
 
-        fig.update_layout(
-            xaxis_title=column,
-            yaxis_title="Number of rows"
-        )
+def generate_numeric_summary(df: pd.DataFrame, column: str) -> dict:
+    numeric_series = pd.to_numeric(
+        df[column],
+        errors="coerce"
+    )
 
-        charts.append(
-            {
-                "subheader": f"Distribution of {column}",
-                "figure": fig
-            }
-        )
+    non_missing_series = numeric_series.dropna()
 
-    # Bar charts for up to 2 useful categorical columns
-    for column in useful_categorical_columns[:2]:
-        top_categories = (
-            df[column]
-            .fillna("Missing")
-            .astype(str)
-            .value_counts()
-            .head(10)
-            .reset_index()
-        )
+    if non_missing_series.empty:
+        return {
+            "missing_count": int(numeric_series.isna().sum()),
+            "non_missing_count": 0,
+            "mean": 0,
+            "median": 0,
+            "standard_deviation": 0,
+            "minimum": 0,
+            "maximum": 0
+        }
 
-        top_categories.columns = [column, "Count"]
+    return {
+        "missing_count": int(numeric_series.isna().sum()),
+        "non_missing_count": int(non_missing_series.count()),
+        "mean": float(non_missing_series.mean()),
+        "median": float(non_missing_series.median()),
+        "standard_deviation": float(non_missing_series.std()),
+        "minimum": float(non_missing_series.min()),
+        "maximum": float(non_missing_series.max())
+    }
 
-        fig = px.bar(
-            top_categories,
-            x="Count",
-            y=column,
-            orientation="h",
-            title=f"Top 10 categories in {column}"
-        )
 
-        fig.update_layout(
-            xaxis_title="Number of rows",
-            yaxis_title=column,
-            yaxis={
-                "categoryorder": "total ascending"
-            }
-        )
+def generate_numeric_histogram(df: pd.DataFrame, column: str):
+    chart_df = df[[column]].copy()
+    chart_df[column] = pd.to_numeric(
+        chart_df[column],
+        errors="coerce"
+    )
+    chart_df = chart_df.dropna(subset=[column])
 
-        charts.append(
-            {
-                "subheader": f"Top categories in {column}",
-                "figure": fig
-            }
-        )
+    fig = px.histogram(
+        chart_df,
+        x=column,
+        title=f"Distribution of {column}",
+        nbins=30
+    )
 
-    # Correlation heatmap if there are at least 2 numeric columns
-    if len(useful_numeric_columns) >= 2:
-        correlation_df = df[useful_numeric_columns].corr(numeric_only=True)
+    fig.update_layout(
+        xaxis_title=column,
+        yaxis_title="Number of rows"
+    )
 
-        fig = px.imshow(
-            correlation_df,
-            text_auto=".2f",
-            title="Correlation heatmap",
-            color_continuous_scale="RdBu",
-            zmin=-1,
-            zmax=1
-        )
+    return fig
 
-        fig.update_layout(
-            xaxis_title="Numeric columns",
-            yaxis_title="Numeric columns"
-        )
 
-        charts.append(
-            {
-                "subheader": "Correlation Between Numeric Columns",
-                "figure": fig
-            }
-        )
+def generate_categorical_summary(df: pd.DataFrame, column: str) -> dict:
+    non_missing_series = df[column].dropna().astype(str)
 
-    # Date trend chart if a date column exists
-    if date_columns:
-        date_column = date_columns[0]
+    if non_missing_series.empty:
+        return {
+            "missing_count": int(df[column].isna().sum()),
+            "non_missing_count": 0,
+            "most_common_category": None,
+            "most_common_count": 0,
+            "most_common_percentage": 0
+        }
 
-        chart_df = df.copy()
-        chart_df[date_column] = pd.to_datetime(
-            chart_df[date_column],
+    value_counts = non_missing_series.value_counts()
+    most_common_category = value_counts.index[0]
+    most_common_count = int(value_counts.iloc[0])
+    non_missing_count = int(non_missing_series.count())
+    most_common_percentage = (most_common_count / non_missing_count) * 100
+
+    return {
+        "missing_count": int(df[column].isna().sum()),
+        "non_missing_count": non_missing_count,
+        "most_common_category": most_common_category,
+        "most_common_count": most_common_count,
+        "most_common_percentage": most_common_percentage
+    }
+
+
+def generate_categorical_bar_chart(df: pd.DataFrame, column: str):
+    chart_df = (
+        df[column]
+        .dropna()
+        .astype(str)
+        .value_counts()
+        .head(10)
+        .reset_index()
+    )
+
+    chart_df.columns = [column, "Count"]
+
+    fig = px.bar(
+        chart_df,
+        x="Count",
+        y=column,
+        orientation="h",
+        title=f"Top 10 categories in {column}"
+    )
+
+    fig.update_layout(
+        xaxis_title="Number of rows",
+        yaxis_title=column,
+        yaxis={
+            "categoryorder": "total ascending"
+        }
+    )
+
+    return fig
+
+
+def generate_date_trend_chart(df: pd.DataFrame, column: str):
+    chart_df = df[[column]].copy()
+    chart_df[column] = pd.to_datetime(
+        chart_df[column],
+        errors="coerce"
+    )
+
+    missing_count = int(chart_df[column].isna().sum())
+    chart_df = chart_df.dropna(subset=[column])
+
+    date_summary = {
+        "missing_count": missing_count,
+        "non_missing_count": int(len(chart_df))
+    }
+
+    if chart_df.empty:
+        return None, date_summary
+
+    chart_df["Date Period"] = chart_df[column].dt.to_period("M").dt.to_timestamp()
+
+    trend_df = (
+        chart_df
+        .groupby("Date Period")
+        .size()
+        .reset_index(name="Row Count")
+    )
+
+    if trend_df.empty:
+        return None, date_summary
+
+    fig = px.line(
+        trend_df,
+        x="Date Period",
+        y="Row Count",
+        markers=True,
+        title=f"Number of records over time using {column}"
+    )
+
+    fig.update_layout(
+        xaxis_title=column,
+        yaxis_title="Number of rows"
+    )
+
+    return fig, date_summary
+
+
+def generate_correlation_heatmap(df: pd.DataFrame, numeric_columns: list):
+    usable_numeric_columns = []
+
+    for column in numeric_columns:
+        numeric_series = pd.to_numeric(
+            df[column],
             errors="coerce"
         )
 
-        chart_df = chart_df.dropna(subset=[date_column])
+        if numeric_series.dropna().nunique() > 1:
+            usable_numeric_columns.append(column)
 
-        if not chart_df.empty:
-            chart_df["Date Period"] = chart_df[date_column].dt.to_period("M").dt.to_timestamp()
+    if len(usable_numeric_columns) < 2:
+        return None
 
-            if useful_numeric_columns:
-                numeric_column = useful_numeric_columns[0]
+    correlation_df = df[usable_numeric_columns].corr(numeric_only=True)
 
-                trend_df = (
-                    chart_df
-                    .groupby("Date Period")[numeric_column]
-                    .mean()
-                    .reset_index()
-                )
+    fig = px.imshow(
+        correlation_df,
+        text_auto=".2f",
+        title="Correlation heatmap",
+        color_continuous_scale="RdBu",
+        zmin=-1,
+        zmax=1
+    )
 
-                fig = px.line(
-                    trend_df,
-                    x="Date Period",
-                    y=numeric_column,
-                    markers=True,
-                    title=f"Average {numeric_column} over time"
-                )
+    fig.update_layout(
+        xaxis_title="Numeric columns",
+        yaxis_title="Numeric columns"
+    )
 
-                fig.update_layout(
-                    xaxis_title=date_column,
-                    yaxis_title=f"Average {numeric_column}"
-                )
-
-            else:
-                trend_df = (
-                    chart_df
-                    .groupby("Date Period")
-                    .size()
-                    .reset_index(name="Row Count")
-                )
-
-                fig = px.line(
-                    trend_df,
-                    x="Date Period",
-                    y="Row Count",
-                    markers=True,
-                    title="Number of rows over time"
-                )
-
-                fig.update_layout(
-                    xaxis_title=date_column,
-                    yaxis_title="Number of rows"
-                )
-
-            charts.append(
-                {
-                    "subheader": f"Trend over time using {date_column}",
-                    "figure": fig
-                }
-            )
-
-    return charts
+    return fig

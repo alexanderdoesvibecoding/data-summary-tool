@@ -1,6 +1,16 @@
 import streamlit as st
 
-from utils.chart_generator import generate_automatic_charts
+from utils.chart_generator import (
+    generate_categorical_bar_chart,
+    generate_categorical_summary,
+    generate_correlation_heatmap,
+    generate_date_trend_chart,
+    generate_numeric_histogram,
+    generate_numeric_summary,
+    get_categorical_columns,
+    get_date_columns,
+    get_numeric_columns,
+)
 from utils.data_loader import get_dataset_overview, load_csv
 from utils.data_quality import generate_data_quality_notes
 from utils.insight_generator import generate_key_insights
@@ -23,6 +33,10 @@ uploaded_file = st.file_uploader(
 )
 
 if uploaded_file is not None:
+    if st.session_state.get("uploaded_file_name") != uploaded_file.name:
+        st.session_state["uploaded_file_name"] = uploaded_file.name
+        st.session_state["analysis_started"] = False
+
     st.subheader("Uploaded File")
     st.write(f"**File name:** {uploaded_file.name}")
 
@@ -33,6 +47,9 @@ if uploaded_file is not None:
         st.dataframe(df.head(10), use_container_width=True)
 
         if st.button("Go"):
+            st.session_state["analysis_started"] = True
+
+        if st.session_state.get("analysis_started", False):
             st.success("Dataset is ready for analysis!")
 
             st.header("Dataset Overview")
@@ -94,20 +111,171 @@ if uploaded_file is not None:
             for note in data_quality_notes:
                 st.info(note)
 
-            st.header("Automatic Visualizations")
+            st.header("Visualizations")
             st.write(
-                "The app chooses a small number of useful charts so the page does not get overcrowded."
+                "Choose variables below to explore specific parts of the dataset. "
+                "Charts update automatically when you change a selection."
             )
 
-            charts = generate_automatic_charts(df, column_summary_df)
+            numeric_columns = get_numeric_columns(df, column_summary_df)
+            categorical_columns = get_categorical_columns(df, column_summary_df)
+            date_columns = get_date_columns(column_summary_df)
 
-            if charts:
-                for chart in charts:
-                    st.subheader(chart["subheader"])
-                    st.plotly_chart(chart["figure"], use_container_width=True)
+            st.subheader("Numeric Column Analysis")
+
+            if numeric_columns:
+                selected_numeric_column = st.selectbox(
+                    "Choose a numeric column to visualize",
+                    numeric_columns
+                )
+
+                numeric_summary = generate_numeric_summary(
+                    df,
+                    selected_numeric_column
+                )
+
+                if numeric_summary["non_missing_count"] > 0:
+                    if numeric_summary["missing_count"] > 0:
+                        st.info(
+                            f"{numeric_summary['missing_count']} missing value(s) were excluded from this chart and summary."
+                        )
+
+                    metric_col1, metric_col2, metric_col3 = st.columns(3)
+
+                    with metric_col1:
+                        st.metric("Average", f"{numeric_summary['mean']:.2f}")
+
+                    with metric_col2:
+                        st.metric("Median", f"{numeric_summary['median']:.2f}")
+
+                    with metric_col3:
+                        st.metric("Standard Deviation", f"{numeric_summary['standard_deviation']:.2f}")
+
+                    metric_col4, metric_col5, metric_col6 = st.columns(3)
+
+                    with metric_col4:
+                        st.metric("Minimum", f"{numeric_summary['minimum']:.2f}")
+
+                    with metric_col5:
+                        st.metric("Maximum", f"{numeric_summary['maximum']:.2f}")
+
+                    with metric_col6:
+                        st.metric("Values Used", numeric_summary["non_missing_count"])
+
+                    numeric_fig = generate_numeric_histogram(
+                        df,
+                        selected_numeric_column
+                    )
+
+                    st.plotly_chart(
+                        numeric_fig,
+                        use_container_width=True
+                    )
+
+                else:
+                    st.info(
+                        f"{selected_numeric_column} does not have any non-missing numeric values to visualize."
+                    )
+
             else:
                 st.info(
-                    "No automatic charts were created because the app did not find enough suitable numeric, categorical, or date/time columns."
+                    "No numeric columns were found, so there is no numeric histogram to show."
+                )
+
+            st.subheader("Categorical Column Analysis")
+
+            if categorical_columns:
+                selected_categorical_column = st.selectbox(
+                    "Choose a categorical column to visualize",
+                    categorical_columns
+                )
+
+                categorical_summary = generate_categorical_summary(
+                    df,
+                    selected_categorical_column
+                )
+
+                if categorical_summary["non_missing_count"] > 0:
+                    if categorical_summary["missing_count"] > 0:
+                        st.info(
+                            f"{categorical_summary['missing_count']} missing value(s) were excluded from this chart and summary."
+                        )
+
+                    st.write(
+                        f"The most common category is **{categorical_summary['most_common_category']}**, "
+                        f"which appears in **{categorical_summary['most_common_percentage']:.2f}%** "
+                        "of the non-missing rows."
+                    )
+
+                    categorical_fig = generate_categorical_bar_chart(
+                        df,
+                        selected_categorical_column
+                    )
+
+                    st.plotly_chart(
+                        categorical_fig,
+                        use_container_width=True
+                    )
+
+                else:
+                    st.info(
+                        f"{selected_categorical_column} does not have any non-missing values to visualize."
+                    )
+
+            else:
+                st.info(
+                    "No categorical columns were found, so there is no categorical bar chart to show."
+                )
+
+            st.subheader("Date/Time Column Analysis")
+
+            if date_columns:
+                selected_date_column = st.selectbox(
+                    "Choose a date column to visualize",
+                    date_columns
+                )
+
+                date_fig, date_summary = generate_date_trend_chart(
+                    df,
+                    selected_date_column
+                )
+
+                if date_fig is not None:
+                    if date_summary["missing_count"] > 0:
+                        st.info(
+                            f"{date_summary['missing_count']} missing or invalid date value(s) were excluded from this chart."
+                        )
+
+                    st.plotly_chart(
+                        date_fig,
+                        use_container_width=True
+                    )
+
+                else:
+                    st.info(
+                        f"{selected_date_column} does not have enough valid date values to create a trend chart."
+                    )
+
+            else:
+                st.info(
+                    "No date/time columns were found, so there is no date trend chart to show."
+                )
+
+            st.subheader("Correlation Between Numeric Columns")
+
+            correlation_fig = generate_correlation_heatmap(
+                df,
+                numeric_columns
+            )
+
+            if correlation_fig is not None:
+                st.plotly_chart(
+                    correlation_fig,
+                    use_container_width=True
+                )
+            else:
+                st.info(
+                    "A correlation heatmap needs at least 2 numeric columns with usable values."
                 )
 
             st.subheader("Key Insights")
