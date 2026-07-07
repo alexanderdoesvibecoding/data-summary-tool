@@ -18,6 +18,17 @@ from utils.data_loader import (
     load_uploaded_file,
 )
 from utils.data_quality import generate_data_quality_notes
+from utils.explanation_generator import (
+    generate_categorical_visualization_explanations,
+    generate_column_type_explanations,
+    generate_correlation_explanations,
+    generate_data_quality_explanations,
+    generate_dataset_overview_explanations,
+    generate_date_visualization_explanations,
+    generate_key_insights_explanations,
+    generate_numeric_visualization_explanations,
+    generate_visualization_overview_explanations,
+)
 from utils.insight_generator import generate_key_insights
 from utils.report_generator import generate_markdown_report
 from utils.type_detection import create_column_summary
@@ -32,6 +43,13 @@ st.set_page_config(
 
 st.title("📊 Data Summarization and Visualization Tool")
 st.write("Upload a CSV or Excel file to get started.")
+
+
+def show_explanations(title: str, explanations: list):
+    with st.expander(title):
+        for explanation in explanations:
+            st.write(f"- {explanation}")
+
 
 uploaded_file = st.file_uploader(
     "Choose a CSV or Excel file",
@@ -104,6 +122,11 @@ if uploaded_file is not None:
             column_summary_df = create_column_summary(df)
             overview = get_dataset_overview(df, column_summary_df)
 
+            show_explanations(
+                "How to read this overview",
+                generate_dataset_overview_explanations(overview)
+            )
+
             col1, col2, col3 = st.columns(3)
 
             with col1:
@@ -131,12 +154,16 @@ if uploaded_file is not None:
 
             st.metric("Date/time Columns", overview["number_of_date_time_columns"])
 
-            st.subheader("Column Names")
-            st.write(list(df.columns))
+            # st.subheader("Column Names")
+            # st.write(list(df.columns))
 
-            st.subheader("Column Type Detection")
+            st.subheader("Column Type Summary")
             st.write(
                 "Each column is automatically classified to help decide what kind of analysis or visualization may fit best."
+            )
+            show_explanations(
+                "What these column types mean",
+                generate_column_type_explanations(column_summary_df)
             )
 
             st.dataframe(
@@ -148,6 +175,10 @@ if uploaded_file is not None:
             st.subheader("Data Quality Notes")
             st.write(
                 "These notes point out things that may be worth reviewing before analyzing the dataset."
+            )
+            show_explanations(
+                "Why these quality checks matter",
+                generate_data_quality_explanations(df, column_summary_df)
             )
 
             data_quality_notes = generate_data_quality_notes(
@@ -167,6 +198,15 @@ if uploaded_file is not None:
             numeric_columns = get_numeric_columns(df, column_summary_df)
             categorical_columns = get_categorical_columns(df, column_summary_df)
             date_columns = get_date_columns(column_summary_df)
+
+            show_explanations(
+                "How to interpret these charts",
+                generate_visualization_overview_explanations(
+                    numeric_columns,
+                    categorical_columns,
+                    date_columns
+                )
+            )
 
             selected_numeric_column = None
             selected_categorical_column = None
@@ -190,6 +230,14 @@ if uploaded_file is not None:
                         st.info(
                             f"{numeric_summary['missing_count']} missing value(s) were excluded from this chart and summary."
                         )
+
+                    show_explanations(
+                        "How to read this numeric chart",
+                        generate_numeric_visualization_explanations(
+                            selected_numeric_column,
+                            numeric_summary
+                        )
+                    )
 
                     metric_col1, metric_col2, metric_col3 = st.columns(3)
 
@@ -261,6 +309,14 @@ if uploaded_file is not None:
                         "of the non-missing rows."
                     )
 
+                    show_explanations(
+                        "How to read this category chart",
+                        generate_categorical_visualization_explanations(
+                            selected_categorical_column,
+                            categorical_summary
+                        )
+                    )
+
                     categorical_fig = generate_categorical_bar_chart(
                         df,
                         selected_categorical_column
@@ -300,6 +356,14 @@ if uploaded_file is not None:
                             f"{date_summary['missing_count']} missing or invalid date value(s) were excluded from this chart."
                         )
 
+                    show_explanations(
+                        "How to read this date chart",
+                        generate_date_visualization_explanations(
+                            selected_date_column,
+                            date_summary
+                        )
+                    )
+
                     st.plotly_chart(
                         date_fig,
                         use_container_width=True
@@ -323,6 +387,11 @@ if uploaded_file is not None:
             )
 
             if correlation_fig is not None:
+                show_explanations(
+                    "How to read this correlation heatmap",
+                    generate_correlation_explanations(True)
+                )
+
                 st.plotly_chart(
                     correlation_fig,
                     use_container_width=True
@@ -331,11 +400,19 @@ if uploaded_file is not None:
                 st.info(
                     "A correlation heatmap needs at least 2 numeric columns with usable values."
                 )
+                show_explanations(
+                    "Why this chart is not shown",
+                    generate_correlation_explanations(False)
+                )
 
             st.subheader("Key Insights")
             st.write(
                 "These insights are created using simple rules, not AI. "
                 "They are meant to help you quickly understand patterns worth reviewing."
+            )
+            show_explanations(
+                "How to use these insights",
+                generate_key_insights_explanations()
             )
 
             key_insights = generate_key_insights(
